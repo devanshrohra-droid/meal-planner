@@ -804,9 +804,13 @@ document.addEventListener("click",ev=>{
     case "set-tab": S.tab=el.dataset.tab;render();break;
     case "set-day": S.activeDay=el.dataset.day;render();break;
     case "generate":
-      if(S.ready){document.getElementById("confirm-regen").style.display="flex";}
-      else doGenerate();
+      if(S.ready){S.showRegenConfirm=true;renderModals();}
+      else{pushHistory();doGenerate();}
       break;
+    case "do-regen":
+      S.showRegenConfirm=false;pushHistory();doGenerate();break;
+    case "cancel-regen":
+      S.showRegenConfirm=false;renderModals();break;
     case "apply-fb":{
       if(!S.fb.trim())return;
       const{plan,changed}=applyFeedbackToPlan(S.fb);
