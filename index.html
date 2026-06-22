@@ -181,7 +181,7 @@ const S={
   fb:"",newRule:"",
   newDishName:"",newDishSlots:{T:false,L:false,D:false},newDishType:"sabzi",
   niName:"",niQty:"",niUnit:"pcs",
-  syncModal:false,settingsSearch:"",
+  syncModal:false,settingsSearch:"",history:ls("mp-history")||[],livePrices:ls("mp-liveprices")||{},pricesUpdated:ls("mp-pricesdate")||null,pricesLoading:false,
   history:ls("mp-history")||[],
   livePrices:ls("mp-liveprices")||{},
   pricesUpdated:ls("mp-pricesdate")||null,
@@ -410,6 +410,19 @@ function updateFbDot(){
   if(st)st.textContent="Firebase: "+(S.fbStatus==="synced"?"Live ✓":S.fbStatus==="offline"?"Offline":"Error — check rules");
 }
 
+function pushHistory(){
+  const snap={plan:JSON.parse(JSON.stringify(S.plan)),shop:JSON.parse(JSON.stringify(S.shop)),rules:JSON.parse(JSON.stringify(S.rules)),custom:JSON.parse(JSON.stringify(S.custom))};
+  S.history=[snap,...(S.history||[])].slice(0,5);
+  ss("mp-history",S.history);
+}
+function undoLast(){
+  if(!S.history||!S.history.length){showToast("Nothing to undo",true);return;}
+  const prev=S.history[0];
+  S.history=S.history.slice(1);
+  ss("mp-history",S.history);
+  S.plan=prev.plan;S.ready=true;S.shop=prev.shop;S.rules=prev.rules;S.custom=prev.custom;
+  saveAll();render();showToast("Undone ✓");
+}
 function saveAll(){
   ss("mp-plan",S.plan);ss("mp-shop",S.shop);
   S.lastSaved=new Date().toISOString();ss("mp-savedat",S.lastSaved);
@@ -456,6 +469,10 @@ function rHeader(){
       )+
       e("div",{style:"display:flex;align-items:center;gap:8px"},
         (t?e("span",{style:"font-size:10px;color:#059669;font-weight:700"},"✓ "+t):"")+
+        e("button",{"data-action":"undo-last",style:"display:flex;align-items:center;gap:4px;background:"+(S.history&&S.history.length?"rgba(59,130,246,0.1)":"rgba(0,0,0,0.04)")+";border:1px solid "+(S.history&&S.history.length?"rgba(59,130,246,0.3)":"rgba(0,0,0,0.08)")+";border-radius:20px;padding:5px 10px;cursor:pointer;font-family:'Nunito',sans-serif"},
+          e("span",{style:"font-size:13px"},"↩")+
+          e("span",{style:"font-size:10px;font-weight:800;color:"+(S.history&&S.history.length?"#3B82F6":"#CBD5E1")},(S.history&&S.history.length)?"Undo ("+S.history.length+")":"")
+        )+
         e("button",{"data-action":"open-sync",style:"display:flex;align-items:center;gap:5px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:20px;padding:6px 12px;cursor:pointer;font-family:'Nunito',sans-serif"},
           e("div",{class:"fb-dot",style:"width:7px;height:7px;border-radius:50%;background:#D97706;flex-shrink:0"})+
           e("span",{style:"font-size:11px;font-weight:700;color:#2563EB"},"Sync")
@@ -544,7 +561,10 @@ function rPlan(){
 
 function rShop(){
   const need=S.shop.filter(it=>!it.have),have=S.shop.filter(it=>it.have);
-  const topBtn=e("button",{"data-action":"update-shop",style:"width:100%;padding:11px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;color:#059669;font-size:13px;font-weight:800;font-family:'Nunito',sans-serif;cursor:pointer;margin-bottom:14px"},"🔄 Update from Meal Plan");
+  const topBtn=e("div",{style:"display:flex;gap:8px;margin-bottom:8px"},
+    e("button",{"data-action":"update-shop",style:"flex:1;padding:11px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;color:#059669;font-size:12px;font-weight:800;font-family:'Nunito',sans-serif;cursor:pointer"},"🔄 Update List")+
+    e("button",{"data-action":"refresh-prices",style:"flex:1;padding:11px;background:"+(S.pricesLoading?"rgba(59,130,246,0.04)":"rgba(59,130,246,0.08)")+";border:1px solid rgba(59,130,246,0.3);border-radius:12px;color:#3B82F6;font-size:12px;font-weight:800;font-family:'Nunito',sans-serif;cursor:"+(S.pricesLoading?"not-allowed":"pointer")},S.pricesLoading?"Fetching...":"💰 Live Prices")
+  )+(S.pricesUpdated?e("p",{style:"font-size:10px;color:#94A3B8;margin-bottom:8px;text-align:center"},"Talabat · "+new Date(S.pricesUpdated).toLocaleString("en-AE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})):"");
   if(!S.ready)return e("div",{style:"padding:20px 20px"},topBtn+e("p",{style:"text-align:center;color:#94A3B8;font-size:13px;padding:20px 0;font-style:italic"},"Generate a meal plan first."));
   if(!S.shop.length)return e("div",{style:"padding:20px 20px"},topBtn+e("p",{style:"text-align:center;color:#94A3B8;font-size:13px;padding:20px 0;font-style:italic"},"Tap above to build your shopping list."));
   let html=topBtn+e("div",{style:"display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"},
@@ -567,6 +587,17 @@ function rShop(){
       )).join("")
     );
   });
+  // Budget total card
+  const totalNeed=need.reduce((s,it)=>s+getItemPrice(it),0);
+  const totalHave=have.reduce((s,it)=>s+getItemPrice(it),0);
+  html+=e("div",{style:"background:linear-gradient(135deg,#EEF2FF,#E0E7FF);border:1px solid rgba(59,130,246,0.25);border-radius:14px;padding:14px 16px;margin:8px 0"},
+    e("div",{style:"display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"},
+      e("span",{style:"font-size:12px;font-weight:700;color:#3B82F6"},"Estimated Budget"+(S.pricesUpdated?" (live)":""))+
+      e("span",{style:"font-size:22px;font-weight:800;color:#1E40AF"},"~"+Math.round(totalNeed)+" AED")
+    )+
+    (totalHave>0?e("p",{style:"font-size:11px;color:#64748B"},"Already have: ~"+Math.round(totalHave)+" AED worth"):"")+
+    e("p",{style:"font-size:10px;color:#94A3B8;margin-top:3px"},S.pricesUpdated?"Live from Talabat UAE":"Estimates · Westzone / Al Maya / Choithrams")
+  );
   if(have.length){
     html+=e("div",{style:"margin-bottom:14px"},
       e("span",{class:"lbl"},"ALREADY HAVE")+
@@ -769,6 +800,7 @@ document.addEventListener("click",ev=>{
   const inModal=ev.target.closest("[data-stopclose]");
   if(a==="close-modal"&&!inModal){S.edit=null;S.syncModal=false;renderModals();return;}
   switch(a){
+    case "undo-last": undoLast();break;
     case "set-tab": S.tab=el.dataset.tab;render();break;
     case "set-day": S.activeDay=el.dataset.day;render();break;
     case "generate":
@@ -791,7 +823,20 @@ document.addEventListener("click",ev=>{
       S.shop=buildShop(S.plan);saveAll();S.edit=null;render();showToast("Updated!");break;}
     case "toggle-have":{S.shop=S.shop.map(it=>it.id===el.dataset.id?{...it,have:!it.have}:it);saveAll();render();break;}
     case "delete-item":{S.shop=S.shop.filter(it=>it.id!==el.dataset.id);saveAll();render();break;}
-    case "update-shop":{S.shop=buildShop(S.plan);saveAll();render();showToast("Shopping list updated!");break;}
+    case "update-shop":{pushHistory();S.shop=buildShop(S.plan);saveAll();render();showToast("Shopping list updated!");break;}
+    case "refresh-prices":{
+      if(S.pricesLoading)break;
+      if(!S.shop||!S.shop.length){showToast("Generate a plan first",true);break;}
+      S.pricesLoading=true;render();
+      const names=[...new Set(S.shop.map(it=>it.name))].slice(0,25);
+      fetch("/.netlify/functions/prices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:names})})
+        .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
+        .then(data=>{
+          if(data&&Object.keys(data).length){S.livePrices=data;S.pricesUpdated=new Date().toISOString();ss("mp-liveprices",S.livePrices);ss("mp-pricesdate",S.pricesUpdated);showToast("Live prices from Talabat ✓");}
+          else showToast("Talabat returned nothing — using estimates",true);
+          S.pricesLoading=false;render();
+        }).catch(()=>{S.pricesLoading=false;render();showToast("Could not reach Talabat",true);});
+      break;}
     case "add-item":{
       if(!S.niName.trim())return;
       S.shop=[...S.shop,{id:"c"+Date.now(),name:S.niName.trim(),qty:S.niQty||1,unit:S.niUnit,cat:"Other",have:false}];
