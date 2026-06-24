@@ -181,8 +181,8 @@ const S={
   fb:"",newRule:"",
   newDishName:"",newDishSlots:{T:false,L:false,D:false},newDishType:"sabzi",
   niName:"",niQty:"",niUnit:"pcs",
-  syncModal:false,settingsSearch:"",history:ls("mp-history")||[],livePrices:ls("mp-liveprices")||{},pricesUpdated:ls("mp-pricesdate")||null,pricesLoading:false,
-  history:ls("mp-history")||[],
+  syncModal:false,settingsSearch:"",history:ls("mp-history")||[],confirmUpdateShop:false,livePrices:ls("mp-liveprices")||{},pricesUpdated:ls("mp-pricesdate")||null,pricesLoading:false,
+  history:ls("mp-history")||[],confirmUpdateShop:false,
   livePrices:ls("mp-liveprices")||{},
   pricesUpdated:ls("mp-pricesdate")||null,
   pricesLoading:false
@@ -701,7 +701,18 @@ function renderModals(){
   if(S.edit)html+=rEditModal();
   if(S.syncModal)html+=rSyncModal();
   if(S.showRegenConfirm)html+=rRegenConfirm();
+  if(S.confirmUpdateShop)html+=rConfirmUpdateShop();
   m.innerHTML=html;
+}
+function rConfirmUpdateShop(){
+  return e("div",{class:"confirm-overlay"},
+    e("div",{class:"confirm-box"},
+      e("div",{style:"font-size:20px;font-weight:700;margin-bottom:8px;color:#1E293B;font-family:'Playfair Display',Georgia,serif"},"Rebuild shopping list?")+
+      e("p",{style:"font-size:13px;color:#64748B;margin-bottom:24px;line-height:1.6"},"This rebuilds from your current meal plan. Any items you added manually or units you changed will be reset.")+
+      e("button",{"data-action":"do-update-shop",style:"width:100%;padding:14px;background:linear-gradient(135deg,#3B82F6,#2563EB);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:800;font-family:'Nunito',sans-serif;cursor:pointer;margin-bottom:10px"},"Yes, rebuild")+
+      e("button",{"data-action":"cancel-update-shop",style:"width:100%;padding:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:12px;color:#3B82F6;font-size:14px;font-weight:800;font-family:'Nunito',sans-serif;cursor:pointer"},"Cancel")
+    )
+  );
 }
 function rRegenConfirm(){
   return e("div",{class:"confirm-overlay"},
@@ -827,7 +838,13 @@ document.addEventListener("click",ev=>{
       S.shop=buildShop(S.plan);saveAll();S.edit=null;render();showToast("Updated!");break;}
     case "toggle-have":{S.shop=S.shop.map(it=>it.id===el.dataset.id?{...it,have:!it.have}:it);saveAll();render();break;}
     case "delete-item":{S.shop=S.shop.filter(it=>it.id!==el.dataset.id);saveAll();render();break;}
-    case "update-shop":{pushHistory();S.shop=buildShop(S.plan);saveAll();render();showToast("Shopping list updated!");break;}
+    case "update-shop":{
+      S.confirmUpdateShop=true;renderModals();break;}
+    case "do-update-shop":{
+      pushHistory();S.shop=buildShop(S.plan);saveAll();
+      S.confirmUpdateShop=false;render();showToast("Shopping list rebuilt from meal plan");break;}
+    case "cancel-update-shop":{
+      S.confirmUpdateShop=false;renderModals();break;}
     case "refresh-prices":{
       if(S.pricesLoading)break;
       if(!S.shop||!S.shop.length){showToast("Generate a plan first",true);break;}
@@ -895,7 +912,7 @@ document.addEventListener("click",ev=>{
 document.addEventListener("input",ev=>{
   const a=ev.target.dataset.action||ev.target.id;
   switch(a){
-    case "edit-search":
+    case "edit-search":{
       S.q=ev.target.value;
       if(S.edit){
         const all=getAllDishes();const meal=S.edit.meal;
@@ -903,22 +920,26 @@ document.addEventListener("input",ev=>{
         const filt=pool.filter(d=>d.toLowerCase().includes(S.q.toLowerCase())).sort();
         const listEl=document.getElementById("edit-dish-list");
         if(listEl)listEl.innerHTML=filt.map(d=>e("span",{class:"dish-chip"+(S.sel.includes(d)?" sel":""),"data-action":"toggle-dish","data-dish":esc(d)},esc(d))).join("");
-      }break;
+      }break;}
     case "fb-area": S.fb=ev.target.value;break;
     case "new-rule": S.newRule=ev.target.value;render();break;
     case "ni-name": S.niName=ev.target.value;break;
     case "ni-qty": S.niQty=ev.target.value;break;
     case "update-qty":{S.shop=S.shop.map(it=>it.id===ev.target.dataset.id?{...it,qty:ev.target.value}:it);saveAll(false);break;}
     case "nd-name": S.newDishName=ev.target.value;render();break;
-    case "settings-search":
+    case "settings-search":{
       S.settingsSearch=ev.target.value;
       const listEl=document.getElementById("settings-dish-list");
-      if(listEl)listEl.innerHTML=renderDishRows(S.settingsSearch);break;
+      if(listEl)listEl.innerHTML=renderDishRows(S.settingsSearch);break;}
   }
 });
 document.addEventListener("change",ev=>{
   if(ev.target.dataset.action==="ni-unit")S.niUnit=ev.target.value;
   if(ev.target.dataset.action==="nd-type")S.newDishType=ev.target.value;
+  if(ev.target.dataset.action==="update-unit"){
+    S.shop=S.shop.map(it=>it.id===ev.target.dataset.id?{...it,unit:ev.target.value}:it);
+    saveAll(false);
+  }
 });
 
 // ── INIT ────────────────────────────────────────────────────────────────────
