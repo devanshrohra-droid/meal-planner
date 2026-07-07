@@ -52,12 +52,7 @@ select option{background:#fff}
 <body>
 <div id="app" style="min-height:100vh;padding-bottom:80px"></div>
 <div id="modals"></div>
-<div id="confirm-regen" class="confirm-bar" style="display:none">
-  <span style="font-size:18px">⚠️</span>
-  <span style="flex:1;font-size:13px;font-weight:700;color:#92400E">Regenerate will replace this week's plan. Sure?</span>
-  <button onclick="window.confirmRegen()" style="padding:7px 14px;background:#F59E0B;border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif">Yes</button>
-  <button onclick="window.cancelRegen()" style="padding:7px 14px;background:transparent;border:1px solid #F59E0B;border-radius:8px;color:#92400E;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif">No</button>
-</div>
+
 <div id="toast" class="toast"></div>
 
 <script>
@@ -112,6 +107,35 @@ const PRICES={
   "pav bhaji masala":[50.0,"kg"]
 };
 
+// ── PATTERN LEARNING ──────────────────────────────────────────────────────
+function getDishWeight(dish){
+  const freq=ls("mp-dish-freq")||{};
+  const dropped=ls("mp-dish-dropped")||{};
+  return Math.max(0.2,1+((freq[dish]||0)*0.25)-((dropped[dish]||0)*0.4));
+}
+function weightedPick(arr){
+  if(!arr||!arr.length)return null;
+  const weights=arr.map(d=>getDishWeight(d));
+  const total=weights.reduce((a,b)=>a+b,0);
+  let rand=Math.random()*total;
+  for(let i=0;i<arr.length;i++){rand-=weights[i];if(rand<=0)return arr[i];}
+  return arr[arr.length-1];
+}
+function recordPlanUsage(plan){
+  const freq={...(ls("mp-dish-freq")||{})};
+  DAYS.forEach(day=>{
+    const p=plan[day];if(!p)return;
+    ["tiffin","lunch","dinner"].forEach(meal=>{
+      const dishes=p[meal];if(dishes)dishes.forEach(dish=>{freq[dish]=(freq[dish]||0)+1;});
+    });
+  });
+  ss("mp-dish-freq",freq);
+}
+function recordDishDropped(dish){
+  if(!dish)return;
+  const d={...(ls("mp-dish-dropped")||{})};
+  d[dish]=(d[dish]||0)+1;ss("mp-dish-dropped",d);
+}
 function toKg(qty,unit){
   if(unit==="g") return qty/1000;
   if(unit==="kg") return qty;
@@ -226,7 +250,7 @@ function smartPick(slot,used,rules){
     rice=byType("rice"),tiffin=byType("tiffin"),snack=byType("snack");
   if(slot==="T"){
     const tp=[...paratha,...tiffin,...snack];
-    const d=pick(shuffle(tp.length?tp:avail));
+    const d=weightedPick(tp.length?tp:avail);
     if(d){used.add(d);return[d];}return null;
   }
   const pats=[];
@@ -239,13 +263,13 @@ function smartPick(slot,used,rules){
   if(gravy.length)pats.push(...Array(5).fill("gravy"));
   if(!pats.length){const d=pick(avail);if(d){used.add(d);return[d];}return null;}
   const pat=pick(shuffle(pats));let res=[];
-  if(pat==="dal+rice"){const d=pick(shuffle(dal)),r=pick(shuffle(rice.filter(x=>!used.has(x))));if(d&&r){res=[d,r];}else if(d)res=[d];}
-  else if(pat==="sabzi+dal"){const s=pick(shuffle(sabzi)),d=pick(shuffle(dal.filter(x=>x!==s&&!used.has(x))));if(s&&d){res=[s,d];}else if(s)res=[s];}
-  else if(pat==="standalone"){const d=pick(shuffle(standalone));if(d)res=[d];}
-  else if(pat==="paratha"){const d=pick(shuffle(paratha));if(d)res=[d];}
-  else if(pat==="gravy+rice"){const g=pick(shuffle(gravy)),r=pick(shuffle(rice.filter(x=>!used.has(x))));if(g&&r){res=[g,r];}else if(g)res=[g];}
-  else if(pat==="sabzi"){const d=pick(shuffle(sabzi));if(d)res=[d];}
-  else if(pat==="gravy"){const d=pick(shuffle(gravy));if(d)res=[d];}
+  if(pat==="dal+rice"){const d=weightedPick(dal),r=weightedPick(rice.filter(x=>!used.has(x)));if(d&&r){res=[d,r];}else if(d)res=[d];}
+  else if(pat==="sabzi+dal"){const s=weightedPick(sabzi),d=weightedPick(dal.filter(x=>x!==s&&!used.has(x)));if(s&&d){res=[s,d];}else if(s)res=[s];}
+  else if(pat==="standalone"){const d=weightedPick(standalone);if(d)res=[d];}
+  else if(pat==="paratha"){const d=weightedPick(paratha);if(d)res=[d];}
+  else if(pat==="gravy+rice"){const g=weightedPick(gravy),r=weightedPick(rice.filter(x=>!used.has(x)));if(g&&r){res=[g,r];}else if(g)res=[g];}
+  else if(pat==="sabzi"){const d=weightedPick(sabzi);if(d)res=[d];}
+  else if(pat==="gravy"){const d=weightedPick(gravy);if(d)res=[d];}
   res.forEach(d=>used.add(d));
   return res.length?res:null;
 }
@@ -400,7 +424,7 @@ async function fbForcePull(){
     S.lastSaved=data.savedAt;ss("mp-savedat",data.savedAt);
     S.fbStatus="synced";updateFbDot();
     render();showToast("Pulled successfully ✓");
-  }catch(e){showToast("Pull failed — check internet",true);}
+  }catch(e){showToast("Pull error: "+e.message,true);console.error("Pull failed:",e);}
 }
 
 function updateFbDot(){
@@ -425,6 +449,7 @@ function undoLast(){
 }
 function saveAll(){
   ss("mp-plan",S.plan);ss("mp-shop",S.shop);
+  if(S.ready)try{recordPlanUsage(S.plan);}catch(e){}
   S.lastSaved=new Date().toISOString();ss("mp-savedat",S.lastSaved);
   fbPush();
 }
@@ -847,16 +872,39 @@ document.addEventListener("click",ev=>{
       S.confirmUpdateShop=false;renderModals();break;}
     case "refresh-prices":{
       if(S.pricesLoading)break;
+      // async IIFE
       if(!S.shop||!S.shop.length){showToast("Generate a plan first",true);break;}
       S.pricesLoading=true;render();
       const names=[...new Set(S.shop.map(it=>it.name))].slice(0,25);
-      fetch("/.netlify/functions/prices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:names})})
-        .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
-        .then(data=>{
-          if(data&&Object.keys(data).length){S.livePrices=data;S.pricesUpdated=new Date().toISOString();ss("mp-liveprices",S.livePrices);ss("mp-pricesdate",S.pricesUpdated);showToast("Live prices from Talabat ✓");}
-          else showToast("Talabat returned nothing — using estimates",true);
-          S.pricesLoading=false;render();
-        }).catch(()=>{S.pricesLoading=false;render();showToast("Could not reach Talabat",true);});
+      (async()=>{
+      // Fetch prices directly via CORS proxy → Talabat UAE
+      const results={};
+      const fetchOne=async(item)=>{
+        try{
+          const q=encodeURIComponent(item);
+          const url="https://corsproxy.io/?"+encodeURIComponent("https://api.talabat.com/v2/delivery/grocery/products/search?q="+q+"&vendorId=379&pageSize=3");
+          const r=await fetch(url,{signal:AbortSignal.timeout(5000)});
+          if(!r.ok)return null;
+          const data=await r.json();
+          const products=data?.products||data?.items||data?.data||[];
+          const match=products[0];
+          const price=match?.price?.amount||match?.price||match?.unitPrice;
+          return price?parseFloat(price):null;
+        }catch{return null;}
+      };
+      let found=0;
+      for(let i=0;i<names.length;i+=3){
+        const batch=names.slice(i,i+3);
+        const prices=await Promise.all(batch.map(fetchOne));
+        batch.forEach((nm,idx)=>{if(prices[idx]!==null){results[nm.toLowerCase()]=Math.round(prices[idx]*10)/10;found++;}});
+      }
+      if(found>0){
+        S.livePrices=results;S.pricesUpdated=new Date().toISOString();
+        ss("mp-liveprices",S.livePrices);ss("mp-pricesdate",S.pricesUpdated);
+        showToast(found+" prices updated from Talabat ✓");
+      }else{showToast("Talabat unavailable — using estimates",true);}
+      S.pricesLoading=false;render();
+      })();
       break;}
     case "add-item":{
       if(!S.niName.trim())return;
@@ -868,6 +916,13 @@ document.addEventListener("click",ev=>{
       ss("mp-rules",S.rules);fbPush();S.newRule="";render();showToast("Rule saved!");break;}
     case "delete-rule":{S.rules=S.rules.filter(r=>String(r.id)!==el.dataset.id);ss("mp-rules",S.rules);fbPush();render();break;}
     case "open-sync": S.syncModal=true;renderModals();break;
+    case "toggle-sync-pause":
+      S.syncPaused=!S.syncPaused;ss("mp-sync-paused",S.syncPaused);
+      if(S.syncPaused){if(fbStream){fbStream.close();fbStream=null;}S.fbStatus="paused";}
+      else{startRealtime();}
+      updateFbDot();renderModals();
+      showToast(S.syncPaused?"Sync paused — changes stay local":"Sync resumed ✓");
+      break;
     case "copy-fcode":
       navigator.clipboard?.writeText(S.familyCode).then(()=>showToast("Code copied!")).catch(()=>showToast(S.familyCode,true));break;
     case "refresh-code":{
@@ -943,7 +998,33 @@ document.addEventListener("change",ev=>{
 });
 
 // ── INIT ────────────────────────────────────────────────────────────────────
-render();
+// Clear incompatible old data (breakfast→tiffin migration)
+try{
+  const old=ls("mp-plan");
+  if(old&&old.mon&&old.mon.breakfast!==undefined){
+    localStorage.removeItem("mp-plan");
+    localStorage.removeItem("mp-shop");
+    localStorage.removeItem("mp-history");
+    S.plan=mkEmpty();S.ready=false;S.shop=[];S.history=[];
+  }
+}catch(e){}
+// Auto-pull from Firebase on first load if no local data
+if(!S.ready){
+  setTimeout(()=>{
+    fbForcePull().then(()=>{}).catch(()=>{});
+  },2000);
+}
+
+// Safe render with error display
+try{
+  render();
+}catch(err){
+  document.getElementById("app").innerHTML='<div style="padding:40px 20px;text-align:center"><p style="color:#EF4444;font-weight:700;margin-bottom:12px">App error — clearing old data...</p><p style="font-size:12px;color:#64748B">'+err.message+'</p></div>';
+  // Clear all data and retry
+  ["mp-plan","mp-shop","mp-rules","mp-custom","mp-history","mp-liveprices"].forEach(k=>localStorage.removeItem(k));
+  S.plan=mkEmpty();S.ready=false;S.shop=[];S.rules=[];S.custom={};S.history=[];
+  setTimeout(()=>render(),1000);
+}
 startRealtime();
 </script>
 </body>
